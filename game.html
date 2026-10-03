@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Game do Bôn làm</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+<style>
+:root{--bg:#e9e6df;--grid:#cfcabd;--ink:#26231f;--panel:#fbfaf7;--line:#d6d1c4;--on:#26231f;--onink:#fbfaf7;--floor:#6d675c;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1d1f22;--grid:#2d3034;--ink:#ebe8e1;--panel:#292b2f;--line:#3b3e43;--on:#ebe8e1;--onink:#1d1f22;--floor:#8b8578}}
+:root[data-theme="dark"]{--bg:#1d1f22;--grid:#2d3034;--ink:#ebe8e1;--panel:#292b2f;--line:#3b3e43;--on:#ebe8e1;--onink:#1d1f22;--floor:#8b8578}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0;overflow:hidden;background:var(--bg);color:var(--ink);font-family:"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+canvas{position:fixed;inset:0;touch-action:none;display:block}
+#hud{position:fixed;top:calc(env(safe-area-inset-top,0px) + 8px);left:12px;right:12px;display:flex;justify-content:space-between;font-size:13px;pointer-events:none;gap:8px}
+#hud span{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:5px 9px}
+#hud i{font-style:normal}
+#hint{position:fixed;top:28%;left:0;right:0;text-align:center;font-size:17px;pointer-events:none;padding:0 32px;transition:opacity .6s}
+#hint h1{font-size:30px;margin:0 0 8px}
+#bar{position:fixed;left:0;right:0;bottom:0;background:var(--panel);border-top:1px solid var(--line);padding:6px 10px calc(env(safe-area-inset-bottom,0px) + 6px)}
+.row{display:flex;gap:6px;overflow-x:auto;padding:3px 0;scrollbar-width:none;align-items:center}
+.row::-webkit-scrollbar{display:none}
+button{font:inherit;font-size:14px;color:var(--ink);background:transparent;border:1px solid var(--line);border-radius:999px;padding:6px 12px;white-space:nowrap;flex:none}
+button.on{background:var(--on);color:var(--onink);border-color:var(--on)}
+button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+#info{font-size:13px;opacity:.75;padding:1px 2px;min-height:18px}
+#szl{display:flex;gap:8px;align-items:center;font-size:14px;width:100%}
+#szl input{flex:1}
+.sw{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:-1px}
+.sr{margin:10px 0}.sr label{display:flex;justify-content:space-between}.sr input{width:100%}
+#pn{position:fixed;left:8px;right:8px;top:calc(env(safe-area-inset-top,0px) + 46px);bottom:calc(var(--barh,260px) + 8px);background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:auto;padding:12px 14px;z-index:5;font-size:14px;line-height:1.5}
+#pn h3{margin:0 0 6px;font-size:17px}#pn p{margin:8px 0}#pn small{display:block;opacity:.7}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"><span><b>Game do Bôn làm</b></span><span><i id="gv"></i> · <i id="cnt"></i></span></div>
+<div id="hint"><h1>Game do Bôn làm</h1>Chạm vào màn hình để thả vật.<br>Kéo một vật để ném nó đi.</div>
+<div id="pn" hidden></div>
+<div id="bar">
+  <div id="info"></div>
+  <div class="row"><label id="szl">Cỡ <input id="sz" type="range" min=".4" max="4" step=".1" value="1"><b id="szv">×1</b></label></div>
+  <div class="row" id="modes"></div>
+  <div class="row" id="mats"></div>
+  <div class="row" id="shapes"></div>
+  <div class="row" id="acts"></div>
+</div>
+<script>
+const {Engine,Bodies,Body,Composite,Mouse,MouseConstraint,Query,Sleeping}=Matter;
+const MATS={
+  go:{n:'Gỗ',d:600,f:.5,r:.2,c:'#b98550',a:.002},
+  thep:{n:'Thép',d:7850,f:.4,r:.15,c:'#8d99a6',a:.001},
+  cao:{n:'Cao su',d:1100,f:.9,r:.88,c:'#d4553f',a:.002},
+  da:{n:'Đá',d:2600,f:.7,r:.1,c:'#7d7a74',a:.001},
+  xop:{n:'Xốp',d:30,f:.5,r:.3,c:'#e8e3d3',a:.03},
+  bang:{n:'Băng',d:920,f:.02,r:.1,c:'#9fd3e6',a:.002},
+  cat:{n:'Cát',d:1600,f:.8,r:.05,c:'#e3c98a',a:.002},
+  kim:{n:'Kim cương',d:3510,f:.1,r:.3,c:'#b9f2ff',a:.001},
+  vang:{n:'Vàng',d:19300,f:.4,r:.05,c:'#e0b02c',a:.001},
+  dong:{n:'Đồng',d:8960,f:.4,r:.1,c:'#b8693d',a:.001},
+  than:{n:'Than đá',d:1400,f:.6,r:.1,c:'#3a3a3d',a:.002},
+  kinh:{n:'Thủy tinh',d:2500,f:.3,r:.2,c:'#a8d8d0',a:.001},
+  cay:{n:'Cây',d:450,f:.6,r:.15,c:'#5a9a47',a:.003}
+};
+const SHAPES={tron:'Tròn',vuong:'Vuông',van:'Tấm ván',tam:'Tam giác',ngu:'Ngũ giác',luc:'Lục giác',thang:'Hình thang',L:'Chữ L',T:'Chữ T',thap:'Chữ thập',sao:'Ngôi sao',cay:'Cái cây',rang:'Bánh răng',doc:'Dốc cố định'};
+const GRAV={'Trái Đất':9.81,'Mặt Trăng':1.62,'Sao Hỏa':3.71};
+let airK=1,fK=1,bK=1,speed=1,gVal=9.81,tab=null;
+let mat='go',shape='tron',gname='Trái Đất',paused=false,rampSign=1,mode='tha',sel=null,spawnSz=1,floorY=0;
+const $=id=>document.getElementById(id),cv=$('c'),ctx=cv.getContext('2d');
+const engine=Engine.create({enableSleeping:true});engine.positionIterations=8;
+const world=engine.world;
+function setG(g){gVal=g;engine.gravity.x=0;engine.gravity.y=1;engine.gravity.scale=g*1e-4;$('gv').textContent='g = '+String(g).replace('.',',')+' m/s²'}
+setG(9.81);
+
+let walls=[];
+function resize(){
+  cv.width=innerWidth;cv.height=innerHeight;Composite.remove(world,walls);
+  document.documentElement.style.setProperty('--barh',$('bar').offsetHeight+'px');
+  const W=cv.width,H=cv.height,fy=H-$('bar').offsetHeight-6,o={isStatic:true,friction:.8,restitution:.1};
+  walls=[Bodies.rectangle(W/2,fy+100,W*3,200,o),Bodies.rectangle(-100,H/2,200,H*3,o),Bodies.rectangle(W+100,H/2,200,H*3,o)];
+  floorY=fy;Composite.add(world,walls);
+}
+addEventListener('resize',resize);
+const mouse=Mouse.create(cv);
+Composite.add(world,MouseConstraint.create(engine,{mouse,constraint:{stiffness:.2,damping:.1,render:{visible:false}}}));
+
+const items=()=>Composite.allBodies(world).filter(b=>walls.indexOf(b)<0);
+const massKg=(m,a)=>m.d*a*1e-5; // độ dày giả định 10 cm
+function make(x,y,s){
+  const m=MATS[mat],o={density:m.d*1e-6,friction:m.f,restitution:m.r,frictionAir:m.a,frictionStatic:m.f};
+  const R=(dx,dy,w,h,a)=>{const r=Bodies.rectangle(x+dx*s,y+dy*s,w*s,h*s,o);if(a)Body.rotate(r,a);return r};
+  const V=p=>{const cx=p.reduce((t,q)=>t+q[0],0)/p.length,cy=p.reduce((t,q)=>t+q[1],0)/p.length;return Bodies.fromVertices(x+cx*s,y+cy*s,[p.map(q=>({x:q[0]*s,y:q[1]*s}))],o)};
+  const C=parts=>Body.create({parts,friction:m.f,restitution:m.r,frictionAir:m.a,frictionStatic:m.f});
+  let b;
+  switch(shape){
+    case'tron':b=Bodies.circle(x,y,20*s,o,40);break;
+    case'vuong':b=Bodies.rectangle(x,y,40*s,40*s,o);break;
+    case'van':b=Bodies.rectangle(x,y,140*s,12*s,o);break;
+    case'tam':b=Bodies.polygon(x,y,3,28*s,o);break;
+    case'ngu':b=Bodies.polygon(x,y,5,26*s,o);break;
+    case'luc':b=Bodies.polygon(x,y,6,26*s,o);break;
+    case'thang':b=Bodies.trapezoid(x,y,64*s,36*s,.4,o);break;
+    case'L':b=C([R(-15,-10,20,40),R(0,20,50,20)]);break;
+    case'T':b=C([R(0,-20,60,20),R(0,5,20,30)]);break;
+    case'thap':b=C([R(0,0,20,60),R(-20,0,20,20),R(20,0,20,20)]);break;
+    case'sao':{const P=[];for(let i=0;i<10;i++){const a=-Math.PI/2+i*Math.PI/5,r=i%2?13:32;P.push([Math.cos(a)*r,Math.sin(a)*r])}
+      const parts=[V([P[1],P[3],P[5],P[7],P[9]])];for(let i=0;i<10;i+=2)parts.push(V([P[(i+9)%10],P[i],P[i+1]]));b=C(parts);break}
+    case'cay':b=C([R(0,18,14,40),Bodies.polygon(x,y-28*s,6,26*s,o)]);break;
+    case'rang':{const parts=[Bodies.circle(x,y,20*s,o,24)];for(let i=0;i<8;i++){const a=i*Math.PI/4;parts.push(R(Math.cos(a)*23,Math.sin(a)*23,10,9,a))}b=C(parts);break}
+    case'doc':b=Bodies.rectangle(x,y,240*s,14*s,{isStatic:true,friction:m.f,restitution:m.r,angle:.35*rampSign});rampSign*=-1;break;
+  }
+  b.mat=m;b.sz=s;applyPhys(b);return b;
+}
+function applyPhys(b){const m=b.mat;for(const p of b.parts){p.friction=m.f*fK;p.frictionStatic=m.f*fK;p.restitution=Math.min(1,m.r*bK)}b.frictionAir=m.a*airK}
+function applyAll(){items().forEach(applyPhys)}
+function applyMat(b,m){b.mat=m;applyPhys(b);if(!b.isStatic)Body.setDensity(b,m.d*1e-6)}
+
+cv.addEventListener('pointerdown',e=>{
+  const r=cv.getBoundingClientRect(),p={x:e.clientX-r.left,y:e.clientY-r.top};
+  const hit=Query.point(items(),p);
+  if(mode==='sua'){sel=hit.length?hit[0]:null;sync();info();modes();return}
+  if(!hit.length&&mat==='cat'&&shape!=='doc'){
+    const m=MATS.cat,y0=Math.min(p.y,floorY-40);
+    for(let i=0;i<30;i++){const g=Bodies.circle(p.x+(Math.random()-.5)*40*spawnSz,y0-Math.random()*50*spawnSz,3.5*spawnSz,{density:m.d*1e-6,friction:m.f,restitution:m.r,frictionAir:m.a,frictionStatic:m.f});g.mat=m;g.sz=spawnSz;applyPhys(g);Composite.add(world,g)}
+    $('hint').style.opacity=0;return}
+  if(!hit.length){Composite.add(world,make(p.x,Math.min(p.y,floorY-40),spawnSz));$('hint').style.opacity=0}
+});
+$('sz').oninput=()=>{const v=+$('sz').value;
+  if(mode==='sua'&&sel){const k=v/sel.sz;Body.scale(sel,k,k);sel.sz=v;Sleeping.set(sel,false)}else spawnSz=v;
+  $('szv').textContent='×'+String(v).replace('.',',');info()};
+function sync(){const v=mode==='sua'&&sel?sel.sz:spawnSz;$('sz').value=v;$('szv').textContent='×'+String(v).replace('.',',')}
+function info(){
+  let t;
+  if(mode==='sua'){
+    if(!sel)t='Chế độ sửa: chạm một vật để chọn, rồi chỉnh cỡ, vật liệu hoặc xoay.';
+    else{t='Đang chọn: '+sel.mat.n+(sel.isStatic?' · cố định':' · khối lượng ≈ '+massKg(sel.mat,sel.area).toFixed(1).replace('.',',')+' kg');}
+  }else{
+    const m=MATS[mat];t=m.n+' · '+m.d+' kg/m³';
+    if(mat==='cat')t+=' · thả thành nhiều hạt cát';
+    else if(shape!=='doc')t+=' · khối lượng ≈ '+massKg(m,make(0,0,spawnSz).area).toFixed(1).replace('.',',')+' kg';
+  }
+  $('info').textContent=t;
+}
+function chips(id,obj,get,set,label){
+  const el=$(id);el.innerHTML='';
+  for(const k in obj){const b=document.createElement('button'),v=obj[k];
+    b.innerHTML=label?`<span class="sw" style="background:${v.c}"></span>${v.n}`:v;
+    if(get()===k&&!(label&&mode==='sua'&&!sel))b.className='on';
+    b.onclick=()=>{set(k);render()};el.appendChild(b)}
+}
+function btns(id,list){
+  const el=$(id);el.innerHTML='';
+  for(const [t,f,on] of list){const b=document.createElement('button');b.textContent=t;if(on)b.className='on';b.onclick=f;el.appendChild(b)}
+}
+function modes(){btns('modes',[
+  ['Thả vật',()=>{mode='tha';sel=null;sync();render()},mode==='tha'],
+  ['Sửa vật',()=>{mode='sua';sync();render()},mode==='sua'],
+  ['Xoay',()=>{if(sel){Body.rotate(sel,Math.PI/12);Sleeping.set(sel,false)}}],
+  ['Xóa vật',()=>{if(sel){Composite.remove(world,sel);sel=null;sync();info()}}]])}
+function acts(){btns('acts',[
+  ['Hướng dẫn',()=>openP('guide'),tab==='guide'],['Chế độ vật lý',()=>openP('phys'),tab==='phys'],
+  ...Object.keys(GRAV).map(k=>[k,()=>{gname=k;setG(GRAV[k]);acts()},gname===k]),
+  ['Hoàn tác',()=>{const l=items();if(l.length){if(l[l.length-1]===sel)sel=null;Composite.remove(world,l[l.length-1])}}],
+  ['Xóa hết',()=>{Composite.remove(world,items());sel=null}],
+  [paused?'Tiếp tục':'Tạm dừng',()=>{paused=!paused;acts()},paused]])}
+function render(){
+  chips('mats',MATS,()=>mat,k=>{mat=k;if(mode==='sua'&&sel)applyMat(sel,MATS[k])},true);
+  chips('shapes',SHAPES,()=>shape,k=>{shape=k;if(mode==='sua'){mode='tha';sel=null;sync()}},false);
+  modes();info();
+}
+const CL='<button onclick="openP(tab)" style="float:right">Đóng</button>';
+const GUIDE=CL+`<h3>Hướng dẫn vật lý</h3>
+<p><b>Trọng lực.</b> Trái Đất kéo mọi vật xuống. Mỗi giây vật rơi nhanh thêm khoảng 9,8 m/s. Trên Mặt Trăng lực kéo chỉ bằng khoảng 1/6.</p>
+<p><b>Khối lượng riêng.</b> Vật nặng hay nhẹ tùy chất liệu: cùng kích cỡ, vàng nặng hơn xốp hơn 600 lần (19300 so với 30 kg/m³). Vật to ra thì nặng thêm.</p>
+<p><b>Ma sát.</b> Lực cản khi hai bề mặt trượt lên nhau. Băng gần như không ma sát nên trượt rất xa, cao su thì bám chặt.</p>
+<p><b>Độ nảy.</b> Sau va chạm, vật giữ lại một phần năng lượng. Cao su giữ gần hết nên nảy cao, đá gần như không nảy.</p>
+<p><b>Lực cản không khí.</b> Không khí làm vật nhẹ như xốp rơi chậm hơn vật nặng. Tắt lực cản đi thì mọi vật rơi cùng lúc.</p>
+<p><b>Quán tính.</b> Vật nặng khó đẩy và cũng khó dừng lại. Thử kéo một vật nhỏ rồi một vật vàng to.</p>
+<p><b>Thử ngay</b></p>
+<div class="row"><button onclick="demo(1)">Rơi cùng lúc</button><button onclick="demo(2)">Đua trên dốc</button></div>
+<small>Game 2D nên chỉ gần đúng thực tế; mọi vật được coi là dày 10 cm.</small>`;
+function put(k,sh,x,y,sz){const om=mat,os=shape;mat=k;shape=sh;const b=make(x,y,sz||1);mat=om;shape=os;Composite.add(world,b);return b}
+function demo(n){
+  tab=null;$('pn').hidden=true;acts();$('hint').style.opacity=0;
+  const W=cv.width;
+  if(n===1){const y=Math.max(60,floorY-320);put('thep','tron',W*.35,y);put('xop','tron',W*.65,y)}
+  else{const yR=Math.max(130,floorY-230);
+    for(const [x,k] of [[W*.25,'bang'],[W*.75,'cao']]){rampSign=1;put('go','doc',x,yR,.7);put(k,'vuong',x-45,yR-38,.8)}}
+}
+function P(g,a,f,b,t){setG(g);gname=g===9.81?'Trái Đất':'';airK=a;fK=f;bK=b;speed=t;engine.timing.timeScale=t;applyAll();acts();fillP()}
+function openP(t){tab=tab===t?null:t;$('pn').hidden=!tab;if(tab)fillP();acts()}
+function fillP(){
+  const pn=$('pn');
+  if(tab==='guide'){pn.innerHTML=GUIDE;return}
+  const D=[
+   ['g','Trọng lực (m/s²)',0,25,.1,()=>gVal,v=>{gname='';setG(v);acts()},'Càng lớn thì vật rơi càng nhanh. 0 là lơ lửng.'],
+   ['ak','Lực cản không khí',0,5,.1,()=>airK,v=>{airK=v;applyAll()},'0 là chân không: mọi vật rơi cùng lúc.'],
+   ['fk','Ma sát',0,2,.05,()=>fK,v=>{fK=v;applyAll()},'Gần 0 thì mọi thứ trơn như băng.'],
+   ['bk','Độ nảy',0,1.5,.05,()=>bK,v=>{bK=v;applyAll()},'Càng cao thì vật càng nảy.'],
+   ['sp','Tốc độ thời gian',.1,2,.1,()=>speed,v=>{speed=v;engine.timing.timeScale=v},'Nhỏ hơn 1 là quay chậm để quan sát.']];
+  pn.innerHTML=CL+'<h3>Chế độ vật lý</h3><div class="row" id="pre"></div>'+D.map(d=>`<div class="sr"><label>${d[1]}<b id="${d[0]}v"></b></label><input type="range" id="${d[0]}" min="${d[2]}" max="${d[3]}" step="${d[4]}"><small>${d[7]}</small></div>`).join('');
+  const upd=()=>D.forEach(d=>{const v=d[5]();$(d[0]).value=v;$(d[0]+'v').textContent=String(+(+v).toFixed(2)).replace('.',',')});
+  D.forEach(d=>{$(d[0]).oninput=()=>{d[6](+$(d[0]).value);upd()}});
+  btns('pre',[['Thực tế',()=>P(9.81,1,1,1,1)],['Chân không',()=>P(9.81,0,1,1,1)],['Sân băng',()=>P(9.81,1,.1,1,1)],['Nảy tưng',()=>P(9.81,1,1,1.5,1)],['Không trọng lực',()=>P(0,1,1,1,1)],['Quay chậm',()=>P(9.81,1,1,1,.3)]]);
+  upd();
+}
+render();acts();resize();
+
+function draw(){
+  const W=cv.width,H=cv.height,css=getComputedStyle(document.documentElement);
+  ctx.clearRect(0,0,W,H);
+  ctx.strokeStyle=css.getPropertyValue('--grid');ctx.lineWidth=1;ctx.beginPath();
+  for(let x=0;x<W;x+=100){ctx.moveTo(x+.5,0);ctx.lineTo(x+.5,floorY)}
+  for(let y=floorY;y>0;y-=100){ctx.moveTo(0,y+.5);ctx.lineTo(W,y+.5)}
+  ctx.stroke();
+  ctx.fillStyle=css.getPropertyValue('--floor');ctx.fillRect(0,floorY,W,H-floorY);
+  ctx.fillStyle=css.getPropertyValue('--ink');ctx.font='11px sans-serif';ctx.globalAlpha=.6;
+  ctx.fillText('ô lưới = 1 m',8,floorY-6);ctx.globalAlpha=1;ctx.lineWidth=2;
+  for(const b of items()){
+    const col=b.isStatic?'#8a857b':b.mat.c,ps=b.parts.length>1?b.parts.slice(1):[b],comp=ps.length>1;
+    ctx.fillStyle=col;ctx.strokeStyle=comp?col:'rgba(0,0,0,.45)';
+    for(const p of ps){ctx.beginPath();
+      if(p.circleRadius)ctx.arc(p.position.x,p.position.y,p.circleRadius,0,7);
+      else{const v=p.vertices;ctx.moveTo(v[0].x,v[0].y);for(let i=1;i<v.length;i++)ctx.lineTo(v[i].x,v[i].y);ctx.closePath()}
+      ctx.fill();ctx.stroke()}
+    if(b.circleRadius&&!comp){ctx.strokeStyle='rgba(0,0,0,.45)';ctx.beginPath();ctx.moveTo(b.position.x,b.position.y);
+      ctx.lineTo(b.position.x+Math.cos(b.angle)*b.circleRadius,b.position.y+Math.sin(b.angle)*b.circleRadius);ctx.stroke()}
+    if(b===sel){ctx.save();ctx.setLineDash([6,4]);ctx.strokeStyle='#e0a100';ctx.lineWidth=2;
+      ctx.strokeRect(b.bounds.min.x-5,b.bounds.min.y-5,b.bounds.max.x-b.bounds.min.x+10,b.bounds.max.y-b.bounds.min.y+10);ctx.restore()}
+  }
+  $('cnt').textContent=items().length+' vật';
+}
+let last=performance.now(),acc=0;
+function loop(t){
+  acc+=Math.min(t-last,100);last=t;
+  while(acc>=1000/60){if(!paused)Engine.update(engine,1000/60);acc-=1000/60}
+  draw();requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
